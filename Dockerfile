@@ -38,19 +38,73 @@ LABEL gocd.version="20.10.0" \
   gocd.full.version="20.10.0-12356" \
   gocd.git.sha="b16b6bc3f7ad3bb39e465ff2168d1cc66c95b4d5"
 
-ADD https://github.com/krallin/tini/releases/download/v0.18.0/tini-static-amd64 /usr/local/sbin/tini
-
 # force encoding
-ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
+ENV LANG='en_US.UTF-8' LANGUAGE='en_US:en' LC_ALL='en_US.UTF-8'
 ENV GO_JAVA_HOME="/gocd-jre"
 
 ARG UID=1000
 ARG GID=1000
 
-RUN \
-# add mode and permissions for files we added above
-  chmod 0755 /usr/local/sbin/tini && \
-  chown root:root /usr/local/sbin/tini && \
+RUN set -eux; \
+  GLIBC_VER="2.30-r0"; \
+  ARCH="$(apk --print-arch)"; \
+  case "${ARCH}" in \
+     aarch64|arm64) \
+    # Fix for https://github.com/sgerrand/alpine-pkg-glibc/issues/113
+       ALPINE_GLIBC_REPO="https://github.com/Rjerk/alpine-pkg-glibc/releases/download/${GLIBC_VER}-arm64"; \
+       TINI_URL="https://github.com/krallin/tini/releases/download/v0.18.0/tini-static-arm64"; \
+       ZLIB_SHA256="c1ede6e430e5ed9a72e70dc955cc382a6732b35a2b2fe1e280a0edfcd37cbde0"; \
+       ZLIB_URL="http://il.us.mirror.archlinuxarm.org/aarch64/core/zlib-1:1.2.11-4-aarch64.pkg.tar.xz"; \
+       GCC_LIBS_SHA256="05fbdb85c368ef7f0535a462690e43dcb861c1b3405b4f3474f639731ef29bcf"; \
+       GCC_LIBS_URL="http://mirror.archlinuxarm.org/aarch64/core/gcc-libs-10.2.0-1-aarch64.pkg.tar.xz"; \
+       OPENJDK_JRE_SHA256="9eecdd39239545b922878abf51015030ba9aed4dda5c4574ddbc669a71ddab31"; \
+       OPENJDK_JRE_URL="https://github.com/AdoptOpenJDK/openjdk15-binaries/releases/download/jdk-15.0.1%2B9/OpenJDK15U-jre_aarch64_linux_hotspot_15.0.1_9.tar.gz"; \
+       ;; \
+    #  armhf|armv7l) \
+    #    ALPINE_GLIBC_REPO=""; \
+    #    TINI_URL=""; \
+    #    ZLIB_SHA256=""; \
+    #    ZLIB_URL=""; \
+    #    GCC_LIBS_SHA256=""; \
+    #    GCC_LIBS_URL=""; \
+    #    OPENJDK_JRE_SHA256="f289d1b9fc05099889eaa9a52d352275d44698f3448153cc2ef05f2fa1c04cca"; \
+    #    OPENJDK_JRE_URL="https://github.com/AdoptOpenJDK/openjdk15-binaries/releases/download/jdk-15.0.1%2B9/OpenJDK15U-jre_arm_linux_hotspot_15.0.1_9.tar.gz"; \
+    #    ;; \
+    #  ppc64el|ppc64le) \
+    #    ALPINE_GLIBC_REPO=""; \
+    #    TINI_URL=""; \
+    #    ZLIB_SHA256=""; \
+    #    ZLIB_URL=""; \
+    #    GCC_LIBS_SHA256=""; \
+    #    GCC_LIBS_URL=""; \
+    #    OPENJDK_JRE_SHA256="e759661cf8b41cecd61709ce14d2169d607288f2efc62739cb2c690605a5a28b"; \
+    #    OPENJDK_JRE_URL="https://github.com/AdoptOpenJDK/openjdk15-binaries/releases/download/jdk-15.0.1%2B9/OpenJDK15U-jre_ppc64le_linux_hotspot_15.0.1_9.tar.gz"; \
+    #    ;; \
+    #  s390x) \
+    #    ALPINE_GLIBC_REPO=""; \
+    #    TINI_URL=""; \
+    #    ZLIB_SHA256=""; \
+    #    ZLIB_URL=""; \
+    #    GCC_LIBS_SHA256=""; \
+    #    GCC_LIBS_URL=""; \
+    #    OPENJDK_JRE_SHA256="47e57b1b67627312e34f911c29a0b7970bef734308db1e413fe53376ed894f3a"; \
+    #    OPENJDK_JRE_URL="https://github.com/AdoptOpenJDK/openjdk15-binaries/releases/download/jdk-15.0.1%2B9/OpenJDK15U-jre_s390x_linux_hotspot_15.0.1_9.tar.gz"; \
+    #    ;; \
+     amd64|x86_64) \
+       ALPINE_GLIBC_REPO="https://github.com/sgerrand/alpine-pkg-glibc/releases/download/${GLIBC_VER}"; \
+       TINI_URL="https://github.com/krallin/tini/releases/download/v0.18.0/tini-static-amd64"; \
+       ZLIB_SHA256="17aede0b9f8baa789c5aa3f358fbf8c68a5f1228c5e6cba1a5dd34102ef4d4e5"; \
+       ZLIB_URL="https://archive.archlinux.org/packages/z/zlib/zlib-1%3A1.2.11-3-x86_64.pkg.tar.xz"; \
+       GCC_LIBS_SHA256="f80320a03ff73e82271064e4f684cd58d7dbdb07aa06a2c4eea8e0f3c507c45c"; \
+       GCC_LIBS_URL="https://archive.archlinux.org/packages/g/gcc-libs/gcc-libs-10.1.0-2-x86_64.pkg.tar.zst"; \
+       OPENJDK_JRE_SHA256="e619197c7a5757631f6ea9c912ab47528ebf64c27cf788cdad22bc9245779411"; \
+       OPENJDK_JRE_URL="https://github.com/AdoptOpenJDK/openjdk15-binaries/releases/download/jdk-15.0.1%2B9/OpenJDK15U-jre_x64_linux_hotspot_15.0.1_9.tar.gz"; \
+       ;; \
+     *) \
+       echo "Unsupported arch: ${ARCH}"; \
+       exit 1; \
+       ;; \
+  esac; \
 # add our user and group first to make sure their IDs get assigned consistently,
 # regardless of whatever dependencies get added
 # add user to root group for gocd to work on openshift
@@ -58,24 +112,23 @@ RUN \
     apk add --no-cache cyrus-sasl cyrus-sasl-plain sudo && \
   apk --no-cache upgrade && \
   apk add --no-cache nss git mercurial subversion openssh-client bash curl procps && \
+  mkdir -p /usr/local/sbin && \
+  curl -LfsS ${TINI_URL} > /usr/local/sbin/tini && \
+# add mode and permissions for tini
+  chmod 0755 /usr/local/sbin/tini && \
+  chown root:root /usr/local/sbin/tini && \
   # install glibc and zlib for adoptopenjdk && \
   # See https://github.com/AdoptOpenJDK/openjdk-docker/blob/ce8b120411b131e283106ab89ea5921ebb1d1759/8/jdk/alpine/Dockerfile.hotspot.releases.slim#L24-L54 && \
     apk add --no-cache --virtual .build-deps binutils && \
-    GLIBC_VER="2.29-r0" && \
-    ALPINE_GLIBC_REPO="https://github.com/sgerrand/alpine-pkg-glibc/releases/download" && \
-    GCC_LIBS_URL="https://archive.archlinux.org/packages/g/gcc-libs/gcc-libs-9.1.0-2-x86_64.pkg.tar.xz" && \
-    GCC_LIBS_SHA256=91dba90f3c20d32fcf7f1dbe91523653018aa0b8d2230b00f822f6722804cf08 && \
-    ZLIB_URL="https://archive.archlinux.org/packages/z/zlib/zlib-1%3A1.2.11-3-x86_64.pkg.tar.xz" && \
-    ZLIB_SHA256=17aede0b9f8baa789c5aa3f358fbf8c68a5f1228c5e6cba1a5dd34102ef4d4e5 && \
     curl -LfsS https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub -o /etc/apk/keys/sgerrand.rsa.pub && \
     SGERRAND_RSA_SHA256="823b54589c93b02497f1ba4dc622eaef9c813e6b0f0ebbb2f771e32adf9f4ef2" && \
     echo "${SGERRAND_RSA_SHA256} */etc/apk/keys/sgerrand.rsa.pub" | sha256sum -c - && \
-    curl -LfsS ${ALPINE_GLIBC_REPO}/${GLIBC_VER}/glibc-${GLIBC_VER}.apk > /tmp/glibc-${GLIBC_VER}.apk && \
-    apk add /tmp/glibc-${GLIBC_VER}.apk && \
-    curl -LfsS ${ALPINE_GLIBC_REPO}/${GLIBC_VER}/glibc-bin-${GLIBC_VER}.apk > /tmp/glibc-bin-${GLIBC_VER}.apk && \
-    apk add /tmp/glibc-bin-${GLIBC_VER}.apk && \
-    curl -Ls ${ALPINE_GLIBC_REPO}/${GLIBC_VER}/glibc-i18n-${GLIBC_VER}.apk > /tmp/glibc-i18n-${GLIBC_VER}.apk && \
-    apk add /tmp/glibc-i18n-${GLIBC_VER}.apk && \
+    curl -LfsS ${ALPINE_GLIBC_REPO}/glibc-${GLIBC_VER}.apk > /tmp/glibc-${GLIBC_VER}.apk && \
+    apk add --no-cache --allow-untrusted /tmp/glibc-${GLIBC_VER}.apk && \
+    curl -LfsS ${ALPINE_GLIBC_REPO}/glibc-bin-${GLIBC_VER}.apk > /tmp/glibc-bin-${GLIBC_VER}.apk && \
+    apk add --no-cache --allow-untrusted /tmp/glibc-bin-${GLIBC_VER}.apk && \
+    curl -Ls ${ALPINE_GLIBC_REPO}/glibc-i18n-${GLIBC_VER}.apk > /tmp/glibc-i18n-${GLIBC_VER}.apk && \
+    apk add --no-cache --allow-untrusted /tmp/glibc-i18n-${GLIBC_VER}.apk && \
     /usr/glibc-compat/bin/localedef --force --inputfile POSIX --charmap UTF-8 "$LANG" || true && \
     echo "export LANG=$LANG" > /etc/profile.d/locale.sh && \
     curl -LfsS ${GCC_LIBS_URL} -o /tmp/gcc-libs.tar.xz && \
@@ -92,9 +145,10 @@ RUN \
     apk del --purge .build-deps glibc-i18n && \
     rm -rf /tmp/*.apk /tmp/gcc /tmp/gcc-libs.tar.xz /tmp/libz /tmp/libz.tar.xz /var/cache/apk/* && \
   # end installing adoptopenjre  && \
-  curl --fail --location --silent --show-error 'https://github.com/AdoptOpenJDK/openjdk15-binaries/releases/download/jdk-15.0.1%2B9/OpenJDK15U-jre_x64_linux_hotspot_15.0.1_9.tar.gz' --output /tmp/jre.tar.gz && \
-  mkdir -p /gocd-jre && \
-  tar -xf /tmp/jre.tar.gz -C /gocd-jre --strip 1 && \
+  curl --fail --location --silent --show-error "${OPENJDK_JRE_URL}" --output /tmp/jre.tar.gz && \
+  echo "${OPENJDK_JRE_SHA256} */tmp/jre.tar.gz" | sha256sum -c - && \
+  mkdir -p ${GO_JAVA_HOME} && \
+  tar -xf /tmp/jre.tar.gz -C ${GO_JAVA_HOME} --strip 1 && \
   rm -rf /tmp/jre.tar.gz && \
   mkdir -p /go-agent /docker-entrypoint.d /go /godata
 

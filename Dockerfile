@@ -29,7 +29,10 @@ RUN \
 RUN unzip /tmp/go-agent-20.10.0-12356.zip -d /
 RUN mv /go-agent-20.10.0 /go-agent && chown -R ${UID}:0 /go-agent && chmod -R g=u /go-agent
 
-FROM docker:dind
+FROM adoptopenjdk:15-jre
+
+# Recreate the `docker:dind` image on top of the multiarch AdoptOpenJDK Ubuntu image.
+# Combine all the RUN commands into a single layer to save space.
 
 LABEL gocd.version="20.10.0" \
   description="GoCD agent based on docker version dind" \
@@ -38,78 +41,119 @@ LABEL gocd.version="20.10.0" \
   gocd.full.version="20.10.0-12356" \
   gocd.git.sha="b16b6bc3f7ad3bb39e465ff2168d1cc66c95b4d5"
 
-ADD https://github.com/krallin/tini/releases/download/v0.18.0/tini-static-amd64 /usr/local/sbin/tini
+# FROM docker:19.03 (https://github.com/docker-library/docker/blob/a7534626601bce99a23f0496a3f659616522ed22/19.03/Dockerfile)
+# FROM docker:dind (https://github.com/docker-library/docker/blob/a7534626601bce99a23f0496a3f659616522ed22/19.03/dind/Dockerfile)
+
+ENV DOCKER_VERSION 19.03.14
+
+# https://github.com/docker-library/docker/pull/166
+#   dockerd-entrypoint.sh uses DOCKER_TLS_CERTDIR for auto-generating TLS certificates
+#   docker-entrypoint.sh uses DOCKER_TLS_CERTDIR for auto-setting DOCKER_TLS_VERIFY and DOCKER_CERT_PATH
+# (For this to work, at least the "client" subdirectory of this path needs to be shared between the client and server containers via a volume, "docker cp", or other means of data sharing.)
+ENV DOCKER_TLS_CERTDIR=/certs
 
 # force encoding
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
 ENV GO_JAVA_HOME="/gocd-jre"
 
 ARG UID=1000
-ARG GID=1000
-
-RUN \
-# add mode and permissions for files we added above
-  chmod 0755 /usr/local/sbin/tini && \
-  chown root:root /usr/local/sbin/tini && \
-# add our user and group first to make sure their IDs get assigned consistently,
-# regardless of whatever dependencies get added
-# add user to root group for gocd to work on openshift
-  adduser -D -u ${UID} -s /bin/bash -G root go && \
-    apk add --no-cache cyrus-sasl cyrus-sasl-plain sudo && \
-  apk --no-cache upgrade && \
-  apk add --no-cache nss git mercurial subversion openssh-client bash curl procps && \
-  # install glibc and zlib for adoptopenjdk && \
-  # See https://github.com/AdoptOpenJDK/openjdk-docker/blob/ce8b120411b131e283106ab89ea5921ebb1d1759/8/jdk/alpine/Dockerfile.hotspot.releases.slim#L24-L54 && \
-    apk add --no-cache --virtual .build-deps binutils && \
-    GLIBC_VER="2.29-r0" && \
-    ALPINE_GLIBC_REPO="https://github.com/sgerrand/alpine-pkg-glibc/releases/download" && \
-    GCC_LIBS_URL="https://archive.archlinux.org/packages/g/gcc-libs/gcc-libs-9.1.0-2-x86_64.pkg.tar.xz" && \
-    GCC_LIBS_SHA256=91dba90f3c20d32fcf7f1dbe91523653018aa0b8d2230b00f822f6722804cf08 && \
-    ZLIB_URL="https://archive.archlinux.org/packages/z/zlib/zlib-1%3A1.2.11-3-x86_64.pkg.tar.xz" && \
-    ZLIB_SHA256=17aede0b9f8baa789c5aa3f358fbf8c68a5f1228c5e6cba1a5dd34102ef4d4e5 && \
-    curl -LfsS https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub -o /etc/apk/keys/sgerrand.rsa.pub && \
-    SGERRAND_RSA_SHA256="823b54589c93b02497f1ba4dc622eaef9c813e6b0f0ebbb2f771e32adf9f4ef2" && \
-    echo "${SGERRAND_RSA_SHA256} */etc/apk/keys/sgerrand.rsa.pub" | sha256sum -c - && \
-    curl -LfsS ${ALPINE_GLIBC_REPO}/${GLIBC_VER}/glibc-${GLIBC_VER}.apk > /tmp/glibc-${GLIBC_VER}.apk && \
-    apk add /tmp/glibc-${GLIBC_VER}.apk && \
-    curl -LfsS ${ALPINE_GLIBC_REPO}/${GLIBC_VER}/glibc-bin-${GLIBC_VER}.apk > /tmp/glibc-bin-${GLIBC_VER}.apk && \
-    apk add /tmp/glibc-bin-${GLIBC_VER}.apk && \
-    curl -Ls ${ALPINE_GLIBC_REPO}/${GLIBC_VER}/glibc-i18n-${GLIBC_VER}.apk > /tmp/glibc-i18n-${GLIBC_VER}.apk && \
-    apk add /tmp/glibc-i18n-${GLIBC_VER}.apk && \
-    /usr/glibc-compat/bin/localedef --force --inputfile POSIX --charmap UTF-8 "$LANG" || true && \
-    echo "export LANG=$LANG" > /etc/profile.d/locale.sh && \
-    curl -LfsS ${GCC_LIBS_URL} -o /tmp/gcc-libs.tar.xz && \
-    echo "${GCC_LIBS_SHA256} */tmp/gcc-libs.tar.xz" | sha256sum -c - && \
-    mkdir /tmp/gcc && \
-    tar -xf /tmp/gcc-libs.tar.xz -C /tmp/gcc && \
-    mv /tmp/gcc/usr/lib/libgcc* /tmp/gcc/usr/lib/libstdc++* /usr/glibc-compat/lib && \
-    strip /usr/glibc-compat/lib/libgcc_s.so.* /usr/glibc-compat/lib/libstdc++.so* && \
-    curl -LfsS ${ZLIB_URL} -o /tmp/libz.tar.xz && \
-    echo "${ZLIB_SHA256} */tmp/libz.tar.xz" | sha256sum -c - && \
-    mkdir /tmp/libz && \
-    tar -xf /tmp/libz.tar.xz -C /tmp/libz && \
-    mv /tmp/libz/usr/lib/libz.so* /usr/glibc-compat/lib && \
-    apk del --purge .build-deps glibc-i18n && \
-    rm -rf /tmp/*.apk /tmp/gcc /tmp/gcc-libs.tar.xz /tmp/libz /tmp/libz.tar.xz /var/cache/apk/* && \
-  # end installing adoptopenjre  && \
-  curl --fail --location --silent --show-error 'https://github.com/AdoptOpenJDK/openjdk15-binaries/releases/download/jdk-15.0.1%2B9/OpenJDK15U-jre_x64_linux_hotspot_15.0.1_9.tar.gz' --output /tmp/jre.tar.gz && \
-  mkdir -p /gocd-jre && \
-  tar -xf /tmp/jre.tar.gz -C /gocd-jre --strip 1 && \
-  rm -rf /tmp/jre.tar.gz && \
-  mkdir -p /go-agent /docker-entrypoint.d /go /godata
 
 ADD docker-entrypoint.sh /
+ADD https://raw.githubusercontent.com/docker/docker/ed89041433a031cafc0a0f19cfe573c31688d377/hack/dind /usr/local/bin/dind
+ADD https://raw.githubusercontent.com/docker-library/docker/a7534626601bce99a23f0496a3f659616522ed22/19.03/modprobe.sh /usr/local/bin/modprobe
+ADD https://raw.githubusercontent.com/docker-library/docker/a7534626601bce99a23f0496a3f659616522ed22/19.03/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+ADD https://raw.githubusercontent.com/docker-library/docker/a7534626601bce99a23f0496a3f659616522ed22/19.03/dind/dockerd-entrypoint.sh /usr/local/bin/dockerd-entrypoint.sh
 
+RUN set -eux; \
+    export DEBIAN_FRONTEND=noninteractive \
+ && apt update \
+ && apt install -y \
+    apt-utils apt-transport-https software-properties-common \
+ && add-apt-repository -y --update ppa:git-core/ppa \
+ && apt install -y \
+    ca-certificates openssh-client wget curl iptables \
+    sudo sasl2-bin libcurl4-nss-dev git mercurial subversion procps \
+ #  pigz: https://github.com/moby/moby/pull/35697 (faster gzip implementation)
+    pigz \
+ && add-apt-repository -y --remove ppa:git-core/ppa \
+ && apt remove -y \
+    apt-utils apt-transport-https software-properties-common \
+ && apt autoremove -y \
+ && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*; \
+ # install docker
+    arch="$(uname --m)"; \
+    case "$arch" in \
+        # amd64
+        x86_64) dockerArch='x86_64'; tiniArch='amd64'; ;; \
+        # arm32v6
+        armhf) dockerArch='armel'; tiniArch='armel'; ;; \
+        # arm32v7
+        armv7) dockerArch='armhf'; tiniArch='armhf'; ;; \
+        # arm64v8
+        aarch64) dockerArch='aarch64'; tiniArch='arm64'; ;; \
+        *) echo >&2 "error: unsupported architecture ($arch)"; exit 1 ;;\
+    esac; \
+    \
+    if ! wget -O docker.tgz "https://download.docker.com/linux/static/stable/${dockerArch}/docker-${DOCKER_VERSION}.tgz"; then \
+        echo >&2 "error: failed to download 'docker-${DOCKER_VERSION}' from 'stable' for '${dockerArch}'"; \
+        exit 1; \
+    fi; \
+    \
+    tar --extract \
+        --file docker.tgz \
+        --strip-components 1 \
+        --directory /usr/local/bin/ \
+    ; \
+    rm docker.tgz; \
+    \
+    dockerd --version; \
+    docker --version; \
+    # set up nsswitch.conf for Go's "netgo" implementation (which Docker explicitly uses)
+    # - https://github.com/docker/docker-ce/blob/v17.09.0-ce/components/engine/hack/make.sh#L149
+    # - https://github.com/golang/go/blob/go1.9.1/src/net/conf.go#L194-L275
+    # - docker run --rm debian:stretch grep '^hosts:' /etc/nsswitch.conf
+    if ! -e /etc/nsswitch.conf; then echo 'hosts: files dns' > /etc/nsswitch.conf; fi; \
+    # also, ensure the directory pre-exists and has wide enough permissions for "dockerd-entrypoint.sh" to create subdirectories, even when run in "rootless" mode
+    mkdir -p /certs /certs/client && chmod 1777 /certs /certs/client; \
+    # (doing both /certs and /certs/client so that if Docker does a "copy-up" into a volume defined on /certs/client, it will "do the right thing" by default in a way that still works for rootless users)
+    # set up subuid/subgid so that "--userns-remap=default" works out-of-the-box
+    groupadd --system dockremap; \
+    useradd --system --gid dockremap dockremap; \
+    echo 'dockremap:165536:65536' >> /etc/subuid; \
+    echo 'dockremap:165536:65536' >> /etc/subgid; \
+    chmod +x /usr/local/bin/dind \
+             /usr/local/bin/modprobe \
+             /usr/local/bin/docker-entrypoint.sh \
+             /usr/local/bin/dockerd-entrypoint.sh \
+ # download tini for the target architecture
+ && mkdir -p /usr/local/sbin \
+ && curl -LfsS https://github.com/krallin/tini/releases/download/v0.19.0/tini-static-${tiniArch} > /usr/local/sbin/tini \
+ # add mode and permissions for tini
+ && chmod 0755 /usr/local/sbin/tini \
+ && chown root:root /usr/local/sbin/tini \
+ # add our user and group first to make sure their IDs get assigned consistently,
+ # regardless of whatever dependencies get added
+ # add user to root group for gocd to work on openshift
+ && useradd --uid ${UID} --shell /bin/bash --gid root go \
+ && mkdir -p /go-agent /docker-entrypoint.d /go /godata \
+ && chown -R go:root /docker-entrypoint.d /go /godata /docker-entrypoint.sh \
+ && chmod -R g=u /docker-entrypoint.d /go /godata /docker-entrypoint.sh \
+ # when the base image was alpine, the JRE was installed at /gocd-jre.
+ # symlink AdoptOpenJDK's JAVA_HOME to /gocd-jre for backwards-compat.
+ && ln -s "${JAVA_HOME}" "${GO_JAVA_HOME}"
 
+VOLUME /var/lib/docker
+EXPOSE 2375 2376
+
+# install GoCD Agent
 COPY --from=gocd-agent-unzip /go-agent /go-agent
 # ensure that logs are printed to console output
-COPY --chown=go:root agent-bootstrapper-logback-include.xml agent-launcher-logback-include.xml agent-logback-include.xml /go-agent/config/
+COPY --chown=go:root agent-bootstrapper-logback-include.xml \
+                     agent-launcher-logback-include.xml \
+                     agent-logback-include.xml \
+                     /go-agent/config/
 COPY --chown=root:root dockerd-sudo /etc/sudoers.d/dockerd-sudo
-
-RUN chown -R go:root /docker-entrypoint.d /go /godata /docker-entrypoint.sh \
-    && chmod -R g=u /docker-entrypoint.d /go /godata /docker-entrypoint.sh
-
-  COPY --chown=root:root run-docker-daemon.sh /
+COPY --chown=root:root run-docker-daemon.sh /
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 
